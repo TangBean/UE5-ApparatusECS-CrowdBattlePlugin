@@ -6,3 +6,6 @@
 # Obsidian
 .obsidian
 .claudian
+
+# JetBrains
+.idea/
