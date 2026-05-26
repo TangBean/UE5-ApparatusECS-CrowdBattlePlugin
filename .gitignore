@@ -2,3 +2,7 @@
 /BattleFrame/Binaries
 /FlowFieldCanvas/Intermediate
 /FlowFieldCanvas/Binaries
+
+# Obsidian
+.obsidian
+.claudian

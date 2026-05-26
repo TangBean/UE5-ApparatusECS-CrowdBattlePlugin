@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>BattleFrameBattleControl 行为逻辑剖析</title>
+<style>
+  :root {
+    --bg: #fafbfc;
+    --panel: #ffffff;
+    --panel-2: #f3f6fa;
+    --text: #24292f;
+    --muted: #57606a;
+    --accent: #0969da;
+    --accent-2: #cf5a16;
+    --good: #1a7f37;
+    --warn: #cf222e;
+    --code-bg: #f6f8fa;
+    --code-border: #d0d7de;
+    --border: #d0d7de;
+    --kw: #cf222e;
+    --ty: #0550ae;
+    --str: #1a7f37;
+    --com: #6e7781;
+    --fn: #8250df;
+    --num: #cf5a16;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 28px 80px; }
+  h1 {
+    font-size: 28px; margin: 0 0 8px;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 12px;
+    color: #24292f;
+  }
+  h2 {
+    font-size: 22px; margin: 40px 0 16px;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: 12px;
+  }
+  h3 { font-size: 17px; margin: 24px 0 10px; color: var(--accent-2); }
+  h4 { font-size: 15px; margin: 18px 0 8px; color: var(--text); }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); font-size: 15px; margin-bottom: 24px; }
+  code, .ref {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--code-border);
+    color: #cf5a16;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  pre code {
+    background: none; border: none; padding: 0; color: #24292f;
+  }
+  .kw { color: var(--kw); font-weight: 600; }
+  .ty { color: var(--ty); }
+  .str { color: var(--str); }
+  .com { color: var(--com); font-style: italic; }
+  .fn { color: var(--fn); }
+  .num { color: var(--num); }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 20px;
+    font-size: 14px;
+    background: var(--panel);
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--panel-2); color: var(--accent); font-weight: 600; }
+  tr:nth-child(even) td { background: #fbfcfd; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .panel.warn { border-left: 4px solid var(--warn); background: #fff8f7; }
+  .panel.good { border-left: 4px solid var(--good); background: #f4faf6; }
+  .panel.info { border-left: 4px solid var(--accent); background: #f4f9ff; }
+  .tag {
+    display: inline-block;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 8px;
+    margin: 2px 4px 2px 0;
+    font-size: 12px;
+    color: var(--accent-2);
+    font-family: monospace;
+  }
+  .tag.state { color: var(--good); border-color: #b6e3c4; background: #f0faf3; }
+  .tag.enum  { color: var(--accent-2); border-color: #f5d4b4; background: #fff5ec; }
+  .tag.flag  { color: var(--fn); border-color: #d8c9f0; background: #faf6ff; }
+  .pipeline {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre;
+    overflow-x: auto;
+    color: #24292f;
+  }
+  .arrow { color: var(--accent); font-weight: 600; }
+  .anchor-list {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 18px;
+    margin: 16px 0 24px;
+  }
+  .anchor-list a {
+    color: var(--accent);
+    text-decoration: none;
+    margin-right: 18px;
+    font-size: 14px;
+  }
+  .anchor-list a:hover { text-decoration: underline; }
+  .scenario {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 14px 0;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .scenario h4 { margin-top: 0; color: var(--accent); border-bottom: 1px dashed var(--border); padding-bottom: 6px; }
+  .timeline {
+    border-left: 2px solid var(--accent);
+    padding-left: 16px;
+    margin: 12px 0;
+  }
+  .timeline .step {
+    margin: 10px 0;
+    position: relative;
+  }
+  .timeline .step::before {
+    content: "●";
+    color: var(--accent);
+    position: absolute;
+    left: -22px;
+  }
+  .frame {
+    font-family: monospace;
+    color: var(--accent-2);
+    font-weight: bold;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 30px 0;
+  }
+  .small { font-size: 13px; color: var(--muted); }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin: 20px 0;
+    overflow-x: auto;
+  }
+  .arch-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    min-width: 920px;
+  }
+  .arch-box {
+    flex: 1;
+    border: 1.5px solid var(--accent);
+    border-radius: 6px;
+    padding: 10px 12px;
+    background: #f4f9ff;
+    font-size: 13px;
+    line-height: 1.5;
+    position: relative;
+  }
+  .arch-box.data    { border-color: #c5a823; background: #fdfaee; }
+  .arch-box.spawn   { border-color: var(--accent); background: #f4f9ff; }
+  .arch-box.entity  { border-color: var(--good);   background: #f0faf3; }
+  .arch-box.sys     { border-color: var(--accent-2); background: #fff5ec; }
+  .arch-box.render  { border-color: var(--fn); background: #faf6ff; }
+  .arch-box .title {
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .arch-box .sub {
+    font-family: monospace;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .arch-arrow {
+    text-align: center;
+    color: var(--accent);
+    font-size: 18px;
+    margin: 4px 0;
+    font-weight: bold;
+  }
+  .arch-arrow .label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: normal;
+    font-style: italic;
+    margin-left: 8px;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend .sw {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1.5px solid;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>BattleFrameBattleControl 行为逻辑剖析</h1>
+<p class="lead">
+以"索敌 → 接近 → 攻击 → 切换目标 → 受击 / 避障"五个场景为线索，剖析 <code>ABattleFrameBattleControl::Tick</code>
+如何用纯 ECS 流水线驱动数万实体的战斗 AI（不依赖 StateTree / BehaviorTree）。
+</p>
+
+<div class="panel info">
+  <strong>核心结论</strong>：BattleFrame 完全不使用 UE 的 AI 框架。它用
+  <em>「Trait 标签 + 枚举子状态 + 顺序 System 流水线」</em>
+  自己实现了一套群体 AI 决策机制。AI 行为是各独立 System 顺序执行后<strong>涌现</strong>出来的，
+  而非任何单点的决策树输出。
+</div>
+
+<div class="anchor-list">
+  <a href="#arch">① 架构图</a>
+  <a href="#overview">② 架构总览</a>
+  <a href="#state">③ 三层状态机</a>
+  <a href="#pipeline">④ Tick 流水线</a>
+  <a href="#scenarios">⑤ 五个场景剖析</a>
+  <a href="#agenttrace">⑥ AgentTrace 深度剖析</a>
+  <a href="#timeline">⑦ 一生时间线</a>
+  <a href="#takeaways">⑧ 设计取舍</a>
+</div>
+
+<hr>
+
+<!-- ========== ARCHITECTURE DIAGRAM ========== -->
+<h2 id="arch">① 架构图（一图入门）</h2>
+
+<p>整个 BattleFrame 的数据 / 控制流可以分成五个垂直层。读这张图能快速理解后面所有章节里出现的"<code>FSubjectHandle</code>"、"<code>Filter</code>"、"<code>Mechanism</code>" 各自处在哪个位置。</p>
+
+<div class="arch-diagram">
+
+  <!-- Layer 1: Data Layer -->
+  <div class="arch-row">
+    <div class="arch-box data">
+      <div class="title">① 配置层 / Data Asset</div>
+      <div class="sub">
+        UAgentConfigDataAsset (UAsset 磁盘资源)<br>
+        ├─ FMove / FAttack / FHealth ...<br>
+        ├─ FTrace / FNavigation / FAvoidance<br>
+        └─ FSubjectRecord ExtraTraits
+      </div>
+    </div>
+  </div>
+  <div class="arch-arrow">▼<span class="label">蓝图 / Spawner 加载</span></div>
+
+  <!-- Layer 2: Spawn -->
+  <div class="arch-row">
+    <div class="arch-box spawn">
+      <div class="title">② 实例化层 / Spawner</div>
+      <div class="sub">
+        AAgentSpawner::SpawnAgentsByConfig...()<br>
+        UBFSubjectiveAgentComponent (Actor 桥接版)<br>
+        把每个字段 SetTrait 到 FSubjectRecord，应用 Multipliers，<br>
+        调用 Mechanism->SpawnSubject() 生成实体
+      </div>
+    </div>
+  </div>
+  <div class="arch-arrow">▼<span class="label">注册到全局 Mechanism</span></div>
+
+  <!-- Layer 3: Entity Layer -->
+  <div class="arch-row">
+    <div class="arch-box entity">
+      <div class="title">③ 实体层 / Apparatus Mechanism &nbsp;<span style="font-weight:normal;color:var(--muted);font-size:12px">(全局唯一)</span></div>
+      <div class="sub">
+        N × FSubjectHandle (每个实体的指针)<br>
+        ├─ 静态配置 traits: FMove / FAttack / FTrace / FHealth ...<br>
+        ├─ 动态状态 traits: FMoving / FTracing / FAttacking ...<br>
+        ├─ 状态标签 (空 trait): FActivated / FPatrolling / FBeingHit / FDying ...<br>
+        └─ Flagmark 位 (EFlagmarkBit::A~M)
+      </div>
+    </div>
+  </div>
+  <div class="arch-arrow">▼<span class="label">每帧 EnchainSolid(Filter)→OperateConcurrently</span></div>
+
+  <!-- Layer 4: Systems -->
+  <div class="arch-row">
+    <div class="arch-box sys">
+      <div class="title">④ 系统层 / ABattleFrameBattleControl::Tick &nbsp;<span style="font-weight:normal;color:var(--muted);font-size:12px">(顺序流水线)</span></div>
+      <div class="sub">
+        Statistics → Appear → Sleep → Patrol → <b>AgentMove</b> → NeighborGrid →<br>
+        <b>AgentTrace</b> → <b>AgentAttackTrigger</b> → <b>AgentAttacking</b> →<br>
+        Projectile → <b>SubjectBeingHit</b> → Slow / Debuff → Death →<br>
+        SpawnFx/Sound → EventInterface → AnimStateMachine → AgentRender
+      </div>
+    </div>
+  </div>
+  <div class="arch-arrow">▼<span class="label">写 Niagara/VAT 数据通道</span></div>
+
+  <!-- Layer 5: Render -->
+  <div class="arch-row">
+    <div class="arch-box render">
+      <div class="title">⑤ 渲染层 / ANiagaraSubjectRenderer</div>
+      <div class="sub">
+        Niagara GPU 粒子 + VAT (Anim To Texture) 批量绘制 N 个实体<br>
+        Actor 模式 (FIsSubjective)：Actor 自带 Mesh，Component Tick 同步 Transform
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="border-color:#c5a823;background:#fdfaee"></span>配置 (静态资源)</span>
+    <span><span class="sw" style="border-color:var(--accent);background:#f4f9ff"></span>实例化</span>
+    <span><span class="sw" style="border-color:var(--good);background:#f0faf3"></span>实体数据</span>
+    <span><span class="sw" style="border-color:var(--accent-2);background:#fff5ec"></span>系统逻辑</span>
+    <span><span class="sw" style="border-color:var(--fn);background:#faf6ff"></span>渲染</span>
+  </div>
+</div>
+
+<div class="panel info">
+  <strong>关键认知</strong>：BattleControl 这个 Actor <em>不持有任何实体</em>。所有 agent 都活在 Apparatus Mechanism 里。
+  BattleControl 只是每帧拉一遍 Mechanism，用 Filter 挑出符合条件的子集，并发地改它们的 trait。
+  跨 System 通信也<strong>不靠函数调用</strong>，全靠"上一个 System 写 trait，下一个 System 读 trait"。
+</div>
+
+<hr>
+
+<!-- ========== OVERVIEW ========== -->
+<h2 id="overview">② 架构总览</h2>
+
+<p>
+<code>ABattleFrameBattleControl</code> 是一个普通的 UE Actor，但它的 <code>Tick()</code> 函数<strong>包揽了整个战斗框架的全部逻辑</strong>
+——从巡逻、索敌、追击、攻击、受击、伤害结算、debuff、死亡、动画状态机、渲染数据回传……都在同一个 Tick 里顺序跑完。
+</p>
+
+<h3>核心调用范式</h3>
+<pre><code><span class="kw">auto</span> Chain = Mechanism-><span class="fn">EnchainSolid</span>(AgentXxxFilter);  <span class="com">// 按 Trait 过滤实体</span>
+Chain-><span class="fn">OperateConcurrently</span>(
+    [&](<span class="ty">FSolidSubjectHandle</span> Subject,
+        <span class="ty">FLocated</span>& Located,
+        <span class="ty">FMove</span>&    Move,
+        ...
+    ) {
+        <span class="com">// 多线程：每个匹配的实体执行一次</span>
+        <span class="com">// 直接读写 trait，输出新状态 / 加 trait / 删 trait</span>
+    },
+    ThreadsCount, BatchSize);
+</code></pre>
+
+<p class="small">
+完整 Filter 列表见 <code>BattleFrameBattleControl.h:148-180</code>，共 30+ 个 Filter，每个对应一个 System 子阶段。
+</p>
+
+<hr>
+
+<!-- ========== STATE MACHINE LAYERS ========== -->
+<h2 id="state">③ 三层叠加的"状态机"</h2>
+
+<p>项目没有任何一个 <em>StateMachine 类</em>。"状态"由三种机制叠加表达：</p>
+
+<table>
+  <thead>
+    <tr><th>层级</th><th>机制</th><th>粒度</th><th>典型用途</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. Trait 标签</strong></td>
+      <td>空结构体 trait 当 tag 用</td>
+      <td>粗（活/死/睡/打/挨打）</td>
+      <td>过滤器分发：决定谁进入哪个 System</td>
+    </tr>
+    <tr>
+      <td><strong>2. 枚举字段</strong></td>
+      <td>Trait 内部的 enum</td>
+      <td>细（瞄准/前摇/后摇/冷却）</td>
+      <td>子状态推进 + 时间累积</td>
+    </tr>
+    <tr>
+      <td><strong>3. Flagmark 位</strong></td>
+      <td><code>EFlagmarkBit::A~M</code></td>
+      <td>瞬时（事件触发位）</td>
+      <td>动画优先级、一次性触发</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Trait 标签清单（部分）</h3>
+<div>
+  <span class="tag state">FActivated</span><span class="tag state">FAppearing</span><span class="tag state">FSleeping</span><span class="tag state">FPatrolling</span><span class="tag state">FTracing</span><span class="tag state">FAttacking</span><span class="tag state">FBeingHit</span><span class="tag state">FDying</span><span class="tag state">FMoving</span><span class="tag state">FNavigating</span><span class="tag state">FAvoiding</span><span class="tag state">FSlowing</span><span class="tag state">FTemporalDamaging</span><span class="tag state">FFalling</span><span class="tag state">FIsSubjective</span>
+</div>
+
+<h3>枚举子状态（部分）</h3>
+<pre><code><span class="kw">enum class</span> <span class="ty">EAttackState</span> {
+    Aim_FirstExec, Aim, PreCast_FirstExec, PreCast, PostCast, Cooling, Completed
+};
+
+<span class="kw">enum class</span> <span class="ty">EMoveState</span> {
+    Sleep_Sleeping,
+    Patrol_Patrolling, Patrol_Waiting,
+    Chase_Chasing,     Chase_Reached,
+    Approach_Approaching, Approach_Arrived
+};
+
+<span class="kw">enum class</span> <span class="ty">EAnimState</span> {
+    BS_IdleMove, Appearing, Sleeping, Attacking, BeingHit, Dying, Falling, Jumping
+};
+</code></pre>
+
+<h3>Flagmark 位</h3>
+<div>
+  <span class="tag flag">AppearAnimFlag (I)</span>
+  <span class="tag flag">AttackAnimFlag (J)</span>
+  <span class="tag flag">HitAnimFlag (K)</span>
+  <span class="tag flag">DeathAnimFlag (L)</span>
+  <span class="tag flag">FallAnimFlag (M)</span>
+</div>
+
+<hr>
+
+<!-- ========== TICK PIPELINE ========== -->
+<h2 id="pipeline">④ Tick 流水线全貌</h2>
+
+<p>下面是 <code>ABattleFrameBattleControl::Tick</code> 每帧的固定执行顺序（精简版）：</p>
+
+<div class="pipeline">Tick(DeltaTime):
+  ├─ Statistics                <span class="com">// 统计存活数</span>
+  ├─ AgentAppearMain           <span class="com">// 处理 FAppearing：延时出场、播 Appear 动画</span>
+  ├─ AgentSleep                <span class="com">// 处理 FSleeping：被唤醒条件</span>
+  ├─ AgentPatrol               <span class="com">// 巡逻路径生成、等待计时</span>
+  ├─ SpeedLimitOverride        <span class="com">// 速度上限覆盖</span>
+  │
+  ├─ <span class="arrow">★ AgentMove</span>             <span class="com">// 主移动循环：导航 + RVO2 避障 + 重力 + 转向</span>
+  ├─ Update NeighborGrid       <span class="com">// 重建空间哈希，供下一步查询</span>
+  │
+  ├─ <span class="arrow">★ AgentTrace</span>            <span class="com">// 索敌：扇形 trace by Traits，写 Tracing.TraceResult</span>
+  ├─ <span class="arrow">★ AgentAttackTrigger</span>    <span class="com">// 距离/角度通过 → SetTraitDeferred(FAttacking)</span>
+  ├─ <span class="arrow">★ AgentAttacking</span>        <span class="com">// 推进 EAttackState 子状态机</span>
+  │
+  ├─ SpawnProjectile           <span class="com">// 攻击产生的子弹</span>
+  ├─ Projectile Move and Dmg   <span class="com">// 子弹飞行 + 伤害结算</span>
+  │
+  ├─ <span class="arrow">★ SubjectBeingHit</span>       <span class="com">// 受击：扣血 + 击退 + 加 FBeingHit</span>
+  ├─ AgentSlowed               <span class="com">// 减速 debuff 累积</span>
+  ├─ AgentTemporalDamaging     <span class="com">// 持续伤害</span>
+  ├─ AgentDeath                <span class="com">// 死亡：FDying 实体的清理</span>
+  │
+  ├─ SpawnActors / Fx / Sound  <span class="com">// 攻击/受击/死亡的特效音效</span>
+  ├─ EventInterface            <span class="com">// 把队列里的事件派发给蓝图 (OnAttack/OnHit/OnDeath)</span>
+  ├─ Agent Anim State Machine  <span class="com">// 动画优先级仲裁（hit 打断 attack 等）</span>
+  └─ AgentRender / SendDataToNiagara  <span class="com">// 写到 Niagara 数据通道</span></div>
+
+<div class="panel info">
+  <strong>关键洞察</strong>：每个 System 都只做"看 trait → 算 → 改 trait"，没有任何
+  <em>"我现在要决策做什么"</em>的中央调度。所谓 AI 行为，是这条流水线跑完后<strong>涌现</strong>出来的。
+</div>
+
+<hr>
+
+<!-- ========== SCENARIOS ========== -->
+<h2 id="scenarios">⑤ 五个场景的实现剖析</h2>
+
+<!-- ============ 场景 1 ============ -->
+<div class="scenario">
+  <h4>场景 ① 索敌：找到敌人在哪里</h4>
+
+  <p><strong>实现位置</strong>：<code>AgentTrace</code> System，<span class="ref">BattleFrameBattleControl.cpp:1475-2006</span>
+  <span class="small">（具体实现见第 ⑥ 节"AgentTrace 深度剖析"）</span></p>
+
+  <p><strong>触发时机</strong>：每帧扫描所有带 <code>FTrace + FTracing + FMove + FLocated</code> trait 的实体，
+  根据 <code>Moving.MoveState</code> 决定是否要重新索敌（不同状态有不同冷却）。</p>
+
+  <p><strong>两种索敌模式</strong>（<code>ETraceMode</code>）：</p>
+  <ul>
+    <li><code>TargetIsPlayer_0</code>：粗暴模式，目标永远是玩家 0（适合塔防杂兵）</li>
+    <li><code>SectorTraceByTraits</code>：通过 <code>NeighborGrid</code> 做扇形空间查询，按 trait 过滤候选</li>
+  </ul>
+
+  <p><strong>结果写入</strong>：<code>Tracing.TraceResult</code>（一个 <code>FSubjectHandle</code>）。
+  这就是后续所有"目标依赖"逻辑的唯一信源。</p>
+</div>
+
+<!-- ============ 场景 2 ============ -->
+<div class="scenario">
+  <h4>场景 ② Move to：移动到可攻击范围</h4>
+
+  <p><strong>实现位置</strong>：<code>AgentMove</code> System，<span class="ref">BattleFrameBattleControl.cpp:448-1452</span> <span class="small">（约 1000 行，全项目最复杂的 System）</span></p>
+
+  <p><strong>核心：Move 状态机的 4 选 1 优先级</strong>（<span class="ref">cpp:534-635</span>）：</p>
+
+<pre><code><span class="kw">if</span> (bIsSleeping)             Moving.MoveState = Sleep_Sleeping;
+<span class="kw">else if</span> (bIsPatrolling)      Moving.MoveState = Patrol_(Patrolling|Waiting);
+<span class="kw">else if</span> (bIsChasing)         Moving.MoveState = Chase_(Chasing|Reached);
+<span class="kw">else</span>                        Moving.MoveState = Approach_(Approaching|Arrived);
+</code></pre>
+
+  <p><strong>"接近敌人"的本质</strong>（<span class="ref">cpp:701-755</span>）：当 <code>Tracing.TraceResult</code> 有效时</p>
+
+<pre><code><span class="kw">if</span> (bHasValidTraceResult && bIsTraceResultHasLocated) {
+    Moving.Goal = Tracing.TraceResult.<span class="fn">GetTrait</span>&lt;<span class="ty">FLocated</span>&gt;().Location;
+    Moving.bHasGoal = <span class="kw">true</span>;
+}
+</code></pre>
+
+  <p><strong>导航三层回落</strong>（节省群体性能的关键）：</p>
+
+<pre><code>有索敌目标？
+├ 是 → 目标绑了 FlowField (FBindFlowField)?
+│       ├ 是，自己在该流场内 → <span class="str">用目标流场（O(1) 查询，群体最便宜）</span>
+│       └ 否 → A* / 直冲
+└ 否 → 自己在 Base FlowField 内？
+        ├ 是 → 用 Base 流场
+        └ 否 → A* / 直冲
+</code></pre>
+
+  <p><strong>速度叠乘</strong>（<span class="ref">cpp:758-807</span>）：基础速度先按状态乘倍率，再被减速/转向角/到目标距离层层削减；
+  最后用 <code>V²/2A</code> 物理刹车公式判定是否该减速停止。</p>
+
+  <p><strong>RVO2 避障</strong>（<span class="ref">cpp:894-1101</span>）：</p>
+  <ol>
+    <li><code>NeighborGrid->GetNeighborCells</code> 查空间网格</li>
+    <li>过滤距离、去重、排除 <code>FDying</code>、按 <code>AvoGroup0~9</code> 过滤</li>
+    <li>MaxHeap 只保留最近 <code>MaxNeighbors</code> 个（避免 O(n²) 爆炸）</li>
+    <li><code>ComputeAvoidingVelocity</code>：RVO2 算法本体，输出新速度</li>
+    <li>对障碍物（Box / Sphere）再跑一遍</li>
+    <li><code>VInterpConstantTo</code> 平滑过渡（避免抽搐）</li>
+  </ol>
+</div>
+
+<!-- ============ 场景 3 ============ -->
+<div class="scenario">
+  <h4>场景 ③ Attack：发起攻击</h4>
+
+  <p>这个场景被拆成<strong>两个独立 System</strong>：</p>
+
+  <h4 style="color:var(--accent-2);border:none">3A) AgentAttackTrigger（<span class="ref">cpp:2011-2078</span>）</h4>
+  <p>判断"能不能开打"：</p>
+
+<pre><code><span class="kw">if</span> (!Subject.<span class="fn">HasTrait</span>&lt;<span class="ty">FAttacking</span>&gt;()) {                <span class="com">// 还没在打</span>
+    <span class="kw">bool</span> bIsTargetValid = Tracing.TraceResult.<span class="fn">IsValid</span>()
+        && !Tracing.TraceResult.<span class="fn">HasTrait</span>&lt;<span class="ty">FDying</span>&gt;()
+        && Tracing.TraceResult.<span class="fn">GetTrait</span>&lt;<span class="ty">FHealth</span>&gt;().Current > 0;
+
+    <span class="kw">if</span> (bIsTargetValid) {
+        <span class="kw">float</span> DistSquared = <span class="ty">FVector</span>::<span class="fn">DistSquared</span>(SelfLoc, TargetLoc);
+        <span class="kw">float</span> CombinedRadius = Attack.Range + SelfRadius + OtherRadius;
+
+        <span class="kw">if</span> (DistSquared &lt;= <span class="ty">FMath</span>::<span class="fn">Square</span>(CombinedRadius)) {
+            Subject.<span class="fn">SetTraitDeferred</span>(<span class="ty">FAttacking</span>());   <span class="com">// ★ 加上 FAttacking 标签</span>
+            <span class="com">// 发 Aiming 事件给蓝图</span>
+        }
+    }
+}
+</code></pre>
+
+  <h4 style="color:var(--accent-2);border:none">3B) AgentAttacking（<span class="ref">cpp:2083+</span>）</h4>
+  <p>已经在打的实体，推进 <code>EAttackState</code> 子状态机：</p>
+
+<pre><code>Aim_FirstExec  <span class="arrow">→</span>  Aim            <span class="com">// 瞄准期，强制转向目标</span>
+              <span class="arrow">↓</span>
+PreCast_FirstExec  <span class="arrow">→</span>  PreCast    <span class="com">// 前摇：播攻击动画，不可被打断</span>
+              <span class="arrow">↓</span>
+PostCast                          <span class="com">// 后摇：到 TimeOfHit 时刻应用伤害</span>
+              <span class="arrow">↓</span>
+Cooling                           <span class="com">// 冷却</span>
+              <span class="arrow">↓</span>
+Completed       <span class="arrow">→</span>  RemoveTrait&lt;FAttacking&gt;()
+</code></pre>
+
+  <p><strong>伤害应用时机</strong>：到达 <code>PostCast</code> 的 <code>TimeOfHit</code> 时刻，调用
+  <code>ApplyPointDamageAndDebuff</code> / <code>ApplyRadialDamageAndDebuff</code> / 生成 Projectile。</p>
+
+  <div class="panel">
+    <strong>为什么拆两个 System？</strong>
+    Trigger 和 Attacking 用<strong>不同的 Filter</strong>：<br>
+    <code>AgentAttackFilter</code> 不要 <code>FAttacking</code>，<code>AgentAttackingFilter</code> 必须有 <code>FAttacking</code>。<br>
+    这样能让 ECS 直接按 archetype 分桶，并行度更高，并避免一帧内对同一实体反复检查。
+  </div>
+</div>
+
+<!-- ============ 场景 4 ============ -->
+<div class="scenario">
+  <h4>场景 ④ 敌人被消灭后，寻找下一个目标</h4>
+
+  <p>分布在多个 System 协作完成，<strong>没有任何中央调度</strong>。链路如下：</p>
+
+  <div class="timeline">
+    <div class="step"><span class="frame">帧 N</span>：<code>SubjectBeingHit</code> System 给目标扣血，如果 <code>Health &lt;= 0</code> →
+      <code>SetTrait(FDying())</code></div>
+    <div class="step"><span class="frame">帧 N</span>：<code>AgentAttacking</code> System 在 Aim 阶段检查目标 → 发现
+      <code>TraceResult.HasTrait&lt;FDying&gt;()</code> → 立刻 <code>RemoveTraitDeferred&lt;FAttacking&gt;</code>
+      + <code>Tracing.TimeLeft = 0</code><span class="ref">（cpp:2112-2118）</span></div>
+    <div class="step"><span class="frame">帧 N+1</span>：<code>AgentTrace</code> System 看到 <code>TimeLeft == 0</code> → 重新做扇形索敌 → 找到新目标 → 写入 <code>TraceResult</code></div>
+    <div class="step"><span class="frame">帧 N+1</span>：<code>AgentMove</code> 的状态机分支命中 <code>bIsChasing</code> → <code>Moving.Goal</code> 改成新目标位置</div>
+    <div class="step"><span class="frame">帧 N+1+</span>：开始接近新目标，循环重启</div>
+  </div>
+
+  <p><strong>关键点</strong>：目标失效检测在<strong>多处独立完成</strong>，而非依赖死亡事件回调：</p>
+  <ul>
+    <li><code>AgentTrace</code> 内：返回结果时排除 <code>FDying</code></li>
+    <li><code>AgentAttackTrigger</code> 内：触发前再次确认目标 alive</li>
+    <li><code>AgentAttacking::Aim</code> 内：每帧检查 <code>TraceResult</code> 是否仍合法</li>
+    <li><code>AgentMove::Chase</code> 分支：<code>bIsChasing = Chase.bEnable &amp;&amp; bHasValidTraceResult</code></li>
+  </ul>
+  <p>这种"<strong>各处独立检查，不依赖事件</strong>"的写法在 ECS 里是常态——因为系统是数据驱动的、并发的、无序通信的。</p>
+</div>
+
+<!-- ============ 场景 5 ============ -->
+<div class="scenario">
+  <h4>场景 ⑤ 自己受到攻击时的反应</h4>
+
+  <p>项目<strong>没有"主动逃跑"行为</strong>，但提供了三种"被动反应"：</p>
+
+  <h4 style="border:none">5A) 受击中断（<code>SubjectBeingHit</code>，<span class="ref">cpp:3005-3247</span>）</h4>
+  <ul>
+    <li>给受击实体加 <code>FBeingHit</code> trait</li>
+    <li>触发 <code>HitAnimFlag</code> → 下一帧 <code>Anim State Machine</code> 切到 <code>EAnimState::BeingHit</code></li>
+    <li><strong>打断当前攻击</strong>：在 <code>Anim State Machine</code> 里（<span class="ref">cpp:4425-4445</span>）：
+<pre><code><span class="kw">if</span> (bIsHitAnim) {
+    bIsHitAnim = Subject.<span class="fn">HasTrait</span>&lt;<span class="ty">FAttacking</span>&gt;()
+        ? Attacking.State != PreCast    <span class="com">// 前摇不能被打断</span>
+        : bIsHitAnim;                   <span class="com">// 但后摇可以取消</span>
+
+    <span class="kw">if</span> (bIsHitAnim)
+        Subject.<span class="fn">SetFlag</span>(AttackAnimFlag, <span class="kw">false</span>);  <span class="com">// hit 优先级 > attack</span>
+}</code></pre>
+    </li>
+    <li>击退（launch）：通过 <code>Moving.LaunchVelSum</code> 注入冲量，<code>AgentMove</code> 下一帧累加到速度上</li>
+  </ul>
+
+  <h4 style="border:none">5B) 群体避障（<code>AgentMove</code> 内嵌 RVO2）</h4>
+  <p>每帧每个实体都会跟邻居做 RVO 互让。这不是"看到危险逃跑"，而是<strong>群体动力学</strong>——
+  防止数千实体挤成一团。攻击中速度自动 ×0.25（<span class="ref">cpp:901</span>），让攻击者"扎根"，逃跑者绕过他们。</p>
+
+  <h4 style="border:none">5C) 减速 / 持续伤害 debuff</h4>
+  <p><code>FDebuff</code> trait 携带配置，<code>FSlowing</code> / <code>FTemporalDamaging</code> 是状态承载。
+  <code>AgentSlowed</code> 和 <code>AgentTemporalDamaging</code> System 每帧把减速效果叠乘到 <code>Slowing.CombinedSlowMult</code>，
+  <code>AgentMove</code> 在算 <code>DesiredSpeedMultiplier</code> 时自动应用。</p>
+
+  <div class="panel warn">
+    <strong>没实现的"主动躲避"</strong>：
+    如果想要"血量低于 20% 时逃跑"，需要自己添加：<br>
+    ① 新 trait <code>FFlee</code>（配置） + <code>FFleeing</code>（标签）<br>
+    ② 新 System <code>AgentFlee</code>，插在 <code>AgentMove</code> 之前<br>
+    ③ 满足条件时 <code>SetTrait(FFleeing)</code> 并改写 <code>Moving.Goal</code>（反向远离）<br>
+    ④ 状态机里加 <code>EMoveState::Flee_Fleeing</code>
+  </div>
+</div>
+
+<hr>
+
+<!-- ========== AGENTTRACE DEEP DIVE ========== -->
+<h2 id="agenttrace">⑥ AgentTrace 深度剖析</h2>
+
+<p><code>AgentTrace</code> 是整个 AI 决策环里"<strong>感知</strong>"的部分 —— 它<em>不直接</em>下决定下一步去哪里、要不要打，
+而是输出一个唯一信源：<code>Tracing.TraceResult</code>。其它所有 System（<code>AgentMove</code> 的 Chase 分支、<code>AgentAttackTrigger</code> 的触发判断、<code>AgentAttacking</code> 的目标失效检测）都读这一个值。</p>
+
+<h3>位置与契约</h3>
+<pre><code><span class="com">// Filter 定义（cpp:4845 附近）</span>
+AgentTraceFilter = <span class="ty">FFilter</span>::<span class="fn">Make</span>&lt;<span class="ty">FAgent</span>, <span class="ty">FLocated</span>, <span class="ty">FTrace</span>, <span class="ty">FTracing</span>,
+                              <span class="ty">FMove</span>, <span class="ty">FMoving</span>, <span class="ty">FActivated</span>&gt;();
+
+<span class="com">// 主调用（cpp:1503）</span>
+<span class="kw">auto</span> Chain = Mechanism-><span class="fn">EnchainSolid</span>(AgentTraceFilter);
+Chain-><span class="fn">Retain</span>();
+</code></pre>
+
+<h3>整体架构：两阶段并发</h3>
+<p>这是 AgentTrace 跟其它 System 最大的不同 —— 它<strong>拆成了两个并发遍历</strong>：</p>
+
+<pre><code><span class="com">// Phase A: 决定"该不该 trace" → 收集候选列表 (cpp:1511-1616)</span>
+Chain-><span class="fn">OperateConcurrently</span>([&](Subject, Located, Trace, Tracing, Moving) {
+    <span class="com">// 1. 冷却倒计时 / 状态判断 → 决定 bShouldTrace</span>
+    <span class="com">// 2. 命中的塞进 per-thread 数组 ValidSubjectsArray[ThreadId%N]</span>
+    <span class="com">// 3. 这一阶段不做任何空间查询，便宜</span>
+}, ThreadsCount, BatchSize);
+
+<span class="com">// 收集所有线程的结果，去重 (cpp:1618-1623)</span>
+<span class="ty">TArray</span>&lt;<span class="ty">FSolidSubjectHandle</span>&gt; ValidSubjects;
+<span class="kw">for</span> (<span class="kw">auto</span>& a : ValidSubjectsArray) ValidSubjects.<span class="fn">Append</span>(a.Subjects);
+
+<span class="com">// Phase B: 对候选名单做真正的扇形查询 (cpp:1626+)</span>
+<span class="ty">ParallelFor</span>(ValidSubjects.<span class="fn">Num</span>(), [&](<span class="kw">int32</span> i) {
+    <span class="com">// 1. 拿到所有相关 trait 引用</span>
+    <span class="com">// 2. 按 MoveState 选合适参数（视野半径/角度/高度）</span>
+    <span class="com">// 3. 执行 SectorTraceForSubjects 空间查询</span>
+    <span class="com">// 4. 写 Tracing.TraceResult</span>
+});
+
+Chain-><span class="fn">Release</span>();
+Mechanism-><span class="fn">ApplyDeferreds</span>();
+</code></pre>
+
+<div class="panel info">
+  <strong>为什么要拆两阶段？</strong><br>
+  Phase A 工作量很小（就是看几个 bool 和倒计时），适合 chain 遍历——所有实体都过一遍，便宜。<br>
+  Phase B 包含 <code>NeighborGrid->SectorTraceForSubjects</code> 这种重操作，每个实体几十~几百次距离/角度检查。<br>
+  分开后：① Phase A 几乎零开销筛掉绝大多数实体（冷却中 / 不能 trace / 处于 attacking 等）；
+  ② Phase B 只对真正需要的实体跑，<code>ParallelFor</code> 切片更均匀（不会出现大量"啥都没干就退出"的薄任务）。
+</div>
+
+<h3>Phase A 细节：按 MoveState 切冷却</h3>
+<pre><code><span class="kw">if</span> (Trace.bEnable && !bHasAttacking) {       <span class="com">// ★ 攻击中绝不索敌</span>
+    <span class="kw">if</span> (Tracing.TimeLeft &lt;= 0) {              <span class="com">// 冷却到了</span>
+        <span class="kw">switch</span> (Moving.MoveState) {
+            <span class="kw">case</span> Sleep_Sleeping:
+                bShouldTrace = Sleep.bCanTrace;
+                Tracing.TimeLeft = Trace.SectorTrace.Sleep.bEnable
+                    ? Trace.SectorTrace.Sleep.CoolDown
+                    : Trace.SectorTrace.Common.CoolDown;     <span class="com">// fallback</span>
+                <span class="kw">break</span>;
+            <span class="kw">case</span> Patrol_Patrolling: <span class="com">/* 用 Patrol.CoolDown */</span>
+            <span class="kw">case</span> Patrol_Waiting:    <span class="com">/* 同上 */</span>
+            <span class="kw">case</span> Chase_Chasing:     <span class="com">/* 用 Chase.CoolDown */</span>
+            <span class="kw">case</span> Chase_Reached:     <span class="com">/* 同上 */</span>
+            <span class="kw">case</span> Approach_*:        <span class="com">/* 用 Common.CoolDown */</span>
+        }
+    } <span class="kw">else</span> {
+        Tracing.TimeLeft -= SafeDeltaTime;     <span class="com">// 普通倒计时</span>
+    }
+}
+</code></pre>
+
+<p><strong>为什么按 MoveState 分桶冷却？</strong></p>
+<ul>
+  <li><strong>休眠中</strong>：可以慢点扫（节能），但能配置"睡觉时是否还能被视野唤醒"</li>
+  <li><strong>巡逻中</strong>：中等频率，需要发现新敌人</li>
+  <li><strong>追击中</strong>：高频率，要确认目标是否还在视野/还活着</li>
+  <li><strong>Approach（一般移动）</strong>：用 Common 默认值</li>
+</ul>
+<p>每个 <code>FSectorTraceParamsSpecific</code> 都有 <code>bEnable</code> 开关，关闭时退回 Common。<strong>设计师能在编辑器里为同一个怪在不同状态下配不同视野</strong>（比如 sleeping 视野很小，chasing 视野大）。</p>
+
+<h3>Phase A 的并发收集技巧</h3>
+<pre><code><span class="com">// per-thread ValidSubjectsArray，避免争抢全局数组</span>
+<span class="kw">uint32</span> ThreadId = <span class="ty">FPlatformTLS</span>::<span class="fn">GetCurrentThreadId</span>();
+<span class="kw">uint32</span> Index = ThreadId % ThreadsCount;
+
+<span class="kw">if</span> (LIKELY(ValidSubjectsArray.<span class="fn">IsValidIndex</span>(Index))) {
+    ValidSubjectsArray[Index].<span class="fn">Lock</span>();                      <span class="com">// 子数组独立锁</span>
+    ValidSubjectsArray[Index].Subjects.<span class="fn">Add</span>(Subject);
+    ValidSubjectsArray[Index].<span class="fn">Unlock</span>();
+}
+</code></pre>
+<p>作者明确写了注释：<em>"this may not evenly distribute, but well enough"</em>。
+线程哈希分桶简单粗暴，可能有点不均匀，但远比一把全局锁高效。</p>
+
+<h3>Phase B 细节：两种 Trace 模式</h3>
+
+<h4>模式 1：<code>ETraceMode::TargetIsPlayer_0</code></h4>
+<p>玩家在哪儿？通过 <code>UGameplayStatics::GetPlayerPawn(World, 0)</code>→<code>FindComponentByClass&lt;USubjectiveActorComponent&gt;</code> 拿到玩家的 Subject（玩家也是个 ECS 实体）。</p>
+
+<p>在 Phase B 前一次性确认玩家有效性（<span class="ref">cpp:1477-1500</span>）：</p>
+<pre><code>bPlayerIsValid = PlayerHandle.<span class="fn">IsValid</span>()
+              && !PlayerHandle.<span class="fn">HasTrait</span>&lt;<span class="ty">FDying</span>&gt;()
+              && PlayerHandle.<span class="fn">HasTrait</span>&lt;<span class="ty">FLocated</span>&gt;()
+              && PlayerHandle.<span class="fn">HasTrait</span>&lt;<span class="ty">FHealth</span>&gt;()
+              && PlayerHandle.<span class="fn">GetTrait</span>&lt;<span class="ty">FHealth</span>&gt;().Current > 0;
+</code></pre>
+
+<p>每个实体的判定走<strong>四步漏斗</strong>，从便宜到贵：</p>
+
+<div class="pipeline">① <span class="ty">高度差</span>      : |Player.Z - Self.Z| &lt;= FinalHeight
+       │  <span class="com">（一次减法）</span>
+       ▼
+② <span class="ty">距离平方</span>     : Dist²(Self, Player) &lt;= (Range + Radius)²
+       │  <span class="com">（不开方，纯乘法）</span>
+       ▼
+③ <span class="ty">扇形角度</span>     : acos(dot(Directed.Direction, ToPlayerDir)) &lt;= Angle/2
+       │  <span class="com">（一次点积 + 一次 acos）</span>
+       ▼
+④ <span class="ty">可见性检查</span>   : SphereTraceSingleForObjects(Self, PlayerSurface, ObstacleType)
+          <span class="com">（这是最贵的，所以放最后；可通过 bCheckObstacle 关掉）</span>
+       ▼
+   Tracing.TraceResult = PlayerHandle ✓</div>
+
+<p>这是<strong>典型的早期退出优化</strong>——前三步不通过直接 break，<code>SphereTrace</code> 这种引擎调用只在最后一步触发，并且只对单一目标做一次（玩家就一个），<strong>不需要遍历邻居网格</strong>。</p>
+
+<h4>模式 2：<code>ETraceMode::SectorTraceByTraits</code></h4>
+<p>用于"找一群可能的目标里最近的那个"。核心是 <code>NeighborGrid->SectorTraceForSubjects</code>：</p>
+
+<pre><code>Tracing.NeighborGrid-><span class="fn">SectorTraceForSubjects</span>(
+    <span class="num">1</span>,                          <span class="com">// 只要 1 个结果</span>
+    Located.Location,           <span class="com">// 检测原点</span>
+    FinalRange,                 <span class="com">// 检测半径</span>
+    FinalHeight,                <span class="com">// 检测高度（柱体高度）</span>
+    TraceDirection,             <span class="com">// 扇形朝向（= Directed.Direction.GetSafeNormal2D()）</span>
+    FinalAngle,                 <span class="com">// 扇形角度</span>
+    bFinalCheckVisibility,      <span class="com">// 是否做 LOS 检查</span>
+    Located.Location, <span class="num">0</span>,         <span class="com">// CheckOrigin (障碍物穿透起点)</span>
+    <span class="ty">ESortMode</span>::NearToFar,     <span class="com">// 排序：从近到远</span>
+    Located.Location,           <span class="com">// SortOrigin</span>
+    IgnoreList,                 <span class="com">// 忽略列表（含自己）</span>
+    Trace.Filter,               <span class="com">// ★ Trait 过滤（包含/排除标签）</span>
+    DebugConfig,
+    Hit, Results
+);
+
+<span class="kw">if</span> (Hit && Results[<span class="num">0</span>].Subject.<span class="fn">IsValid</span>()) {
+    Tracing.TraceResult = Results[<span class="num">0</span>].Subject;     <span class="com">// 只取最近的</span>
+}
+</code></pre>
+
+<p><strong><code>FBFFilter Trace.Filter</code> 的设计</strong>：可以分别配置 "<code>IncludeTraits</code>"（必须有这些 trait）和 "<code>ExcludeTraits</code>"（不能有这些 trait），以及 <code>ObstacleObjectType</code>（用于 LOS）。例如配一个怪只攻击玩家阵营且会飞的目标，就 Include FAgent + FFlyable + Team0，Exclude FDying。</p>
+
+<h3>跨状态的副作用：丢失目标 → 回到巡逻</h3>
+<pre><code><span class="com">// Go back to patrol state when no target (cpp:1991-1999)</span>
+<span class="kw">const</span> <span class="kw">bool</span> bShouldPatrol = !bHasValidTraceResult
+    && !Subject.<span class="fn">HasTrait</span>&lt;<span class="ty">FPatrolling</span>&gt;()
+    && Patrol.OnLostTarget == <span class="ty">EPatrolRecoverMode</span>::Patrol;
+
+<span class="kw">if</span> (bShouldPatrol) {
+    <span class="ty">FPatrolling</span> NewPatrolling;
+    <span class="fn">ResetPatrol</span>(Patrol, NewPatrolling, Located);
+    Subject.<span class="fn">SetTraitDeferred</span>(NewPatrolling);  <span class="com">// 加 FPatrolling 标签</span>
+}
+</code></pre>
+<p>这是 AgentTrace 唯一一处会"主动改变其它 trait"的地方 ——
+追击目标丢失（trace 失败）后，根据 <code>FPatrol.OnLostTarget</code> 设置决定是否回到巡逻状态。
+<strong>下一帧 AgentMove 看到 <code>FPatrolling</code>，状态机分支会自动切到 <code>Patrol_*</code>，重启巡逻循环</strong>。</p>
+
+<h3>事件队列：通知蓝图层</h3>
+<pre><code><span class="com">// Trace 开始事件</span>
+<span class="kw">if</span> (bShouldTrace && bHasIsSubjective) {     <span class="com">// 只有 Actor 桥接的实体才发</span>
+    <span class="ty">FTraceData</span> TraceData;
+    TraceData.SelfSubject = <span class="ty">FSubjectHandle</span>(Subject);
+    TraceData.State = <span class="ty">ETraceEventState</span>::Begin;
+    OnTraceQueue.<span class="fn">Enqueue</span>(TraceData);              <span class="com">// MPSC 无锁队列</span>
+}
+
+<span class="com">// Trace 结束事件</span>
+TraceData.State = bHasValidTraceResult
+    ? <span class="ty">ETraceEventState</span>::End_Reason_Succeed
+    : <span class="ty">ETraceEventState</span>::End_Reason_Fail;
+OnTraceQueue.<span class="fn">Enqueue</span>(TraceData);
+</code></pre>
+<p>这些事件由后面的 <code>EventInterface</code> System（<span class="ref">cpp:4149+</span>）统一出队，<strong>在主线程</strong>派发给挂着 <code>UBFSubjectiveAgentComponent</code> 的 Actor 的蓝图事件接口（<code>OnTraceStart</code> / <code>OnTraceSucceed</code> / <code>OnTraceFail</code>），让用户写蓝图能响应。</p>
+
+<h3>关键设计点小结</h3>
+<table>
+  <thead>
+    <tr><th>设计</th><th>原因</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>两阶段（gather → ParallelFor）</td>
+      <td>Phase A 极轻量，过滤掉 90% 实体；Phase B 重操作只对剩下的跑，并行更均匀</td>
+    </tr>
+    <tr>
+      <td>per-thread ValidSubjectsArray + 子数组锁</td>
+      <td>避免全局锁竞争，简单哈希分桶</td>
+    </tr>
+    <tr>
+      <td>四步漏斗 (高度→距离²→角度→LOS)</td>
+      <td>按计算成本递增排序，前三步全是数学运算，最后才碰引擎 API</td>
+    </tr>
+    <tr>
+      <td>距离判定全程用距离平方</td>
+      <td>避免开方，距离 &lt; R 等价于 dist² &lt; R²</td>
+    </tr>
+    <tr>
+      <td>按 MoveState 切冷却 + 视野参数</td>
+      <td>设计师可分状态调（睡觉视野小、追击视野大），数据驱动</td>
+    </tr>
+    <tr>
+      <td><code>!bHasAttacking</code> 直接跳过</td>
+      <td>攻击中不应该切目标，否则会"瞄一半改瞄别人"破坏体验</td>
+    </tr>
+    <tr>
+      <td>失败时按 <code>OnLostTarget</code> 切回巡逻</td>
+      <td>跨 System 用 trait 沟通：本 System 只负责设 <code>FPatrolling</code>，AgentMove 自动接管</td>
+    </tr>
+    <tr>
+      <td>事件入 MPSC 队列，主线程统一出队</td>
+      <td>蓝图回调不是线程安全的，并发 lambda 内禁止直接 call</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ========== TIMELINE ========== -->
+<h2 id="timeline">⑦ 一个实体"攻击玩家"的完整时间线</h2>
+
+<p>把五个场景串起来，看一个杂兵从巡逻到攻击到换目标的完整生命周期：</p>
+
+<div class="timeline">
+  <div class="step">
+    <span class="frame">帧 1（巡逻中）</span><br>
+    <code>FPatrolling</code> trait 在身上，<code>MoveState = Patrol_Patrolling</code>。<br>
+    <code>AgentPatrol</code> 生成新 <code>Moving.Goal</code>。<br>
+    <code>AgentMove</code> 按 Goal 计算速度，RVO 避开同伴。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 K（发现敌人）</span><br>
+    <code>AgentTrace</code> Phase A：<code>Tracing.TimeLeft</code> 归零 → 加入 ValidSubjects。<br>
+    <code>AgentTrace</code> Phase B：扇形 trace → 命中玩家 → 写 <code>Tracing.TraceResult</code>。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 K+1（开始追击）</span><br>
+    <code>AgentMove</code>：<code>bIsChasing == true</code> → <code>MoveState = Chase_Chasing</code>。<br>
+    <code>Moving.Goal = TraceResult.Location</code>，开始接近。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 L（进入攻击范围）</span><br>
+    <code>AgentAttackTrigger</code>：距离 &lt; <code>Attack.Range</code> →
+    <code>SetTraitDeferred(FAttacking())</code>，发 <code>EAttackEventState::Aiming</code> 事件。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 L+1 ~ L+N（攻击中）</span><br>
+    <code>AgentAttacking</code> 推进 <code>EAttackState</code>：
+    <span class="tag enum">Aim_FirstExec</span> →
+    <span class="tag enum">Aim</span> →
+    <span class="tag enum">PreCast</span>（点亮 <code>AttackAnimFlag</code>，播攻击动画）→
+    <span class="tag enum">PostCast</span>（到 <code>TimeOfHit</code> 时应用伤害）→
+    <span class="tag enum">Cooling</span> →
+    <span class="tag enum">Completed</span> → <code>RemoveTrait&lt;FAttacking&gt;()</code>。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 M（攻击间被自己受击中断）</span><br>
+    被其他怪打中 → <code>SubjectBeingHit</code> 给 <code>FBeingHit</code>。<br>
+    若当前不在 PreCast → Anim State Machine 切到 BeingHit，<code>AttackAnimFlag</code> 清除。<br>
+    <code>Moving.LaunchVelSum</code> 累加击退冲量，下帧 <code>AgentMove</code> 应用。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 P（目标死亡）</span><br>
+    <code>SubjectBeingHit</code> 检测玩家 <code>Health &lt;= 0</code>，给玩家 <code>FDying</code>。<br>
+    <code>AgentAttacking::Aim</code> 下一帧检查 → 发现 <code>TraceResult.HasTrait&lt;FDying&gt;()</code> →
+    立即 <code>RemoveTrait&lt;FAttacking&gt;</code> + <code>Tracing.TimeLeft = 0</code>。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 P+1（自动换目标）</span><br>
+    <code>AgentTrace</code> 立即重新扫描 → 找到下一个目标 → 写入 <code>TraceResult</code>。<br>
+    <code>AgentMove</code> 下一帧 <code>bIsChasing = true</code> → <code>MoveState</code> 回到 <code>Chase_Chasing</code>。
+  </div>
+
+  <div class="step">
+    <span class="frame">帧 Z（自己阵亡）</span><br>
+    <code>SubjectBeingHit</code> 检测自身 <code>Health &lt;= 0</code> → <code>SetTrait(FDying)</code>。<br>
+    <code>AgentDeath</code> 处理动画、特效、延时 Despawn。<br>
+    <span class="small">其他实体的 trace / attack 都因 <code>HasTrait&lt;FDying&gt;</code> 检查自动忽略它。</span>
+  </div>
+</div>
+
+<hr>
+
+<!-- ========== TAKEAWAYS ========== -->
+<h2 id="takeaways">⑧ 关键设计取舍</h2>
+
+<table>
+  <thead>
+    <tr><th>设计决策</th><th>原因</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>不用 StateTree / BehaviorTree</td>
+      <td>它们是 per-Actor 的 UObject 树，几千实体性能崩溃。ECS 流水线天然并行。</td>
+    </tr>
+    <tr>
+      <td>Trait 标签 + enum 子状态 + Flagmark 三层叠加</td>
+      <td>粗粒度过滤靠标签（archetype 分桶），细粒度推进靠 enum（数据），瞬时事件靠 Flagmark（位运算最便宜）。</td>
+    </tr>
+    <tr>
+      <td>Attack 拆 Trigger + Attacking 两个 System</td>
+      <td>不同 Filter → 不同 archetype 桶 → 并行度更高。同时避免一帧内重复判定。</td>
+    </tr>
+    <tr>
+      <td>AgentTrace 拆 gather + ParallelFor 两阶段</td>
+      <td>Phase A 极轻量先过滤大多数；Phase B 的重查询只对候选跑，切片更均匀。</td>
+    </tr>
+    <tr>
+      <td>目标失效的"分布式检查"</td>
+      <td>不依赖事件回调。每个 System 在用到 <code>TraceResult</code> 前自己确认 alive，ECS 系统天然解耦。</td>
+    </tr>
+    <tr>
+      <td>FlowField &gt; A* &gt; 直冲 三层导航回落</td>
+      <td>FlowField 烘焙一次群体共享 O(1)；A* 单人精度；直冲兜底。按场景成本递增。</td>
+    </tr>
+    <tr>
+      <td>RVO2 + NeighborGrid + MaxHeap 截断</td>
+      <td>RVO2 数学严谨，但 O(n²)；网格查询限制邻居范围，堆维护只保留最近 N 个。</td>
+    </tr>
+    <tr>
+      <td>大量使用 <code>SetTraitDeferred</code> / <code>RemoveTraitDeferred</code></td>
+      <td>并发 lambda 内直接改 archetype 会导致迭代器失效；deferred 操作在帧末统一提交。</td>
+    </tr>
+    <tr>
+      <td>距离判定全程用距离平方</td>
+      <td>避免开方，距离 &lt; R 等价于 dist² &lt; R²。</td>
+    </tr>
+    <tr>
+      <td>速度积分用 <code>VInterpConstantTo</code> 而非直接赋值</td>
+      <td>让群体有"惯性感"，避免大量实体同帧瞬变方向造成的视觉抽搐。</td>
+    </tr>
+    <tr>
+      <td>所有事件入队（OnAttackQueue / OnHitQueue / OnDeathQueue / OnTraceQueue），EventInterface 统一派发</td>
+      <td>蓝图回调不能在并发 lambda 里调（不线程安全），用 MPSC queue 解耦。</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<div class="panel good">
+  <strong>一句话总结</strong>：
+  <code>BattleFrameBattleControl::Tick</code> 是一条<strong>固定顺序、纯数据驱动、全程并发</strong>的 ECS 流水线。
+  你描述的"索敌→Move→Attack→换目标→受击"五个行为，在项目里被解耦成
+  <code>AgentTrace</code> / <code>AgentMove</code> / <code>AgentAttackTrigger</code> / <code>AgentAttacking</code> /
+  <code>SubjectBeingHit</code> 五个独立 System，
+  它们之间<strong>不直接调用</strong>，只通过 <code>Tracing.TraceResult</code>、<code>Moving.Goal</code>、
+  <code>FAttacking</code>、<code>FBeingHit</code>、<code>FDying</code> 这些共享 trait 通信。
+  这种范式牺牲了 StateTree 的可视化与可读性，换来 25,000 agent / 60fps 的群体战斗性能。
+</div>
+
+</div>
+</body>
+</html>
