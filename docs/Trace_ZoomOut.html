@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>BattleFrame · 索敌 (Trace) 子系统解读</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --fg: #1f2328;
+    --muted: #57606a;
+    --accent: #d97757;
+    --accent-soft: #f4e6dd;
+    --code-bg: #f5f2ee;
+    --border: #d9d5cd;
+    --kw: #cf222e;
+    --type: #6639ba;
+    --str: #0a3069;
+    --com: #6e7781;
+  }
+  html { font-size: 15px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--fg); max-width: 1040px; margin: 0 auto; padding: 32px 28px 80px; line-height: 1.65; }
+  h1 { font-size: 1.9rem; border-bottom: 2px solid var(--accent); padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 1.35rem; margin-top: 2.2em; padding-left: 10px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 1.08rem; margin-top: 1.4em; color: var(--accent); }
+  nav.toc { background: var(--accent-soft); padding: 14px 22px; border-radius: 6px; margin: 18px 0 30px; }
+  nav.toc ol { margin: 4px 0; padding-left: 22px; }
+  nav.toc a { color: #8a3b1a; text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  code { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; font-size: 0.92em;
+         background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+        padding: 12px 14px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; font-size: 0.86em; }
+  pre .ln { color: var(--com); user-select: none; display: inline-block; width: 3em; text-align: right; padding-right: 12px; }
+  .kw { color: var(--kw); font-weight: 600; }
+  .ty { color: var(--type); }
+  .st { color: var(--str); }
+  .cm { color: var(--com); font-style: italic; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.92em; }
+  th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--accent-soft); }
+  tr:nth-child(even) td { background: #fff; }
+  .pipeline { font-family: "JetBrains Mono", Consolas, monospace; background: var(--code-bg);
+              padding: 14px 18px; border-radius: 6px; border: 1px solid var(--border);
+              white-space: pre; line-height: 1.6; overflow-x: auto; }
+  .highlight { background: var(--accent-soft); padding: 0 4px; border-radius: 3px; font-weight: 600; }
+  .note { background: #fff8e6; border-left: 4px solid #d4a72c; padding: 8px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  .file { color: var(--muted); font-size: 0.88em; font-family: "JetBrains Mono", monospace; }
+  .badge { display: inline-block; background: var(--accent); color: white; padding: 1px 7px; border-radius: 10px; font-size: 0.78em; margin-right: 4px; }
+  ul.compact li { margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<h1>BattleFrame · 索敌 (Trace) 子系统 — 放大一层抽象</h1>
+
+<p>本文档以 <code>Plugins/BattleFrame/Source/BattleFrame/Private/BattleFrameBattleControl.cpp</code> <b>L1472–L2006</b> 的 <code>// 索敌 | Trace</code> 区块为切入点，向外扩展到整个战斗 Tick 管线、配置入口、事件出口与下游消费者，画出一张可导航的模块地图。</p>
+
+<nav class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#sec1">索敌在 Tick 管线中的位置</a></li>
+    <li><a href="#sec2">两阶段并行结构（Gather → Trace）</a></li>
+    <li><a href="#sec3">MoveState 驱动的参数选择</a></li>
+    <li><a href="#sec4">两种 ETraceMode 的检测路径</a></li>
+    <li><a href="#sec5">领域词汇表 (Trait / Struct Glossary)</a></li>
+    <li><a href="#sec6">事件出口与调试出口</a></li>
+    <li><a href="#sec7">命中后的副作用与下游消费链</a></li>
+    <li><a href="#sec8">上游配置入口</a></li>
+  </ol>
+</nav>
+
+<!-- ============================== -->
+<h2 id="sec1">1 · 索敌在 Tick 管线中的位置</h2>
+
+<p>整段代码运行在 <code>ABattleFrameBattleControl::Tick(float DeltaTime)</code> 内，由 UE 引擎 Actor Tick 机制驱动，没有中间调度器。Tick 函数由若干 <code>#pragma region</code> 组成的串行阶段构成；索敌处于"空间数据就绪后、攻击决策前"的中游位置：</p>
+
+<div class="pipeline">┌─ Statistics     <span class="cm">// 统计计数</span>
+├─ Appear         <span class="cm">// 出生 / 入场</span>
+├─ Sleep          <span class="cm">// 休眠状态机</span>
+├─ Patrol         <span class="cm">// 巡逻状态机</span>
+├─ Chase          <span class="cm">// 追击状态机</span>
+├─ Move           <span class="cm">// 移动 / 转向 / 寻路</span>
+├─ Update NeighborGrid  <span class="cm">// 重建空间格</span>
+├─ <span class="highlight">Trace (L1472–L2006)</span>      <span class="cm">// 本文主角</span>
+├─ Attack Trigger <span class="cm">// 读 Tracing.TraceResult 决定开打</span>
+├─ Hit            <span class="cm">// 命中 / 伤害</span>
+└─ ...            <span class="cm">// 动画 / 抛射物 / 事件出队</span></div>
+
+<p><b>为什么放在这个位置？</b></p>
+<ul class="compact">
+  <li>上游 <b>Move → Update NeighborGrid</b> 已经把 <code>FLocated / FDirected</code> 更新到本帧最新，并重建了空间索引；索敌可以直接复用最新位姿。</li>
+  <li>下游 <b>Attack Trigger</b> 需要消费 <code>FTracing.TraceResult</code> 才能决定是否进入攻击；索敌必须先写完结果。</li>
+</ul>
+
+<!-- ============================== -->
+<h2 id="sec2">2 · 两阶段并行结构（Gather → Trace）</h2>
+
+<p>区块内部其实是 <b>两个并行阶段</b>，中间通过 <code>ValidSubjectsArray</code> 数组桥接：</p>
+
+<div class="pipeline">       ┌─────────────────────────────────────────┐
+Phase A│ Chain-&gt;OperateConcurrently (筛选 + 冷却)  │   遍历所有匹配 AgentTraceFilter 的 agent
+       │   ├─ 判断 MoveState                       │   状态判断 + Tracing.TimeLeft 扣减
+       │   ├─ 写 ValidSubjectsArray[ThreadId]      │   按线程分桶 + per-bucket lock
+       │   └─ 入队 OnTraceQueue (Begin 事件)        │
+       └─────────────────────────────────────────┘
+                       │
+                       ▼ 合并所有桶 → ValidSubjects
+       ┌─────────────────────────────────────────┐
+Phase B│ ParallelFor (真正的检测)                  │   只在子集上做重计算
+       │   ├─ switch (MoveState) 选参数            │
+       │   ├─ switch (ETraceMode) 执行检测         │
+       │   │     ├─ TargetIsPlayer_0               │   高度→距²→角度→可见性 4 关
+       │   │     └─ SectorTraceByTraits            │   NeighborGrid 扇形查询
+       │   ├─ 写回 Tracing.TraceResult              │
+       │   ├─ 入队 OnTraceQueue (Succeed/Fail)      │
+       │   └─ 失败时 SetTraitDeferred(FPatrolling)  │
+       └─────────────────────────────────────────┘
+                       │
+                       ▼
+              Mechanism-&gt;ApplyDeferreds()</div>
+
+<div class="note"><b>为什么要分两步？</b><br>
+第一阶段是 ECS 链上的<b>轻量过滤</b>：状态判定 + 冷却扣减，必须遍历整个 <code>AgentTraceFilter</code>。<br>
+第二阶段是<b>潜在重操作</b>：空间查询 + 可选可见性 raycast，只在筛出的子集上执行 — 这样把昂贵的工作量精确投放在需要的 agent 上。<br>
+此外 <code>ValidSubjectsArray</code> 按线程 ID 分桶（<code>Index = ThreadId % ThreadsCount</code>），每个桶自带锁，避免单一全局锁竞争。</div>
+
+<h3>关键代码：Phase A 的桶式收集</h3>
+<pre><code><span class="cm">// L1503–L1508  建链 + 计算并发参数 + 准备分桶</span>
+<span class="kw">auto</span> Chain = Mechanism-&gt;EnchainSolid(AgentTraceFilter);
+Chain-&gt;Retain();
+UBattleFrameFunctionLibraryRT::CalculateThreadsCountAndBatchSize(
+    Chain-&gt;IterableNum(), MaxThreadsAllowed, <span class="st">200</span>, ThreadsCount, BatchSize);
+
+<span class="ty">TArray</span>&lt;FValidSubjects&gt; ValidSubjectsArray;
+ValidSubjectsArray.SetNum(ThreadsCount);
+
+<span class="cm">// L1568–L1578  把"该索敌"的 agent 放进对应线程的桶</span>
+<span class="kw">if</span> (bShouldTrace) {
+    <span class="ty">uint32</span> ThreadId = FPlatformTLS::GetCurrentThreadId();
+    <span class="ty">uint32</span> Index = ThreadId % ThreadsCount;
+    <span class="kw">if</span> (LIKELY(ValidSubjectsArray.IsValidIndex(Index))) {
+        ValidSubjectsArray[Index].Lock();
+        ValidSubjectsArray[Index].Subjects.Add(Subject);
+        ValidSubjectsArray[Index].Unlock();
+    }
+}</code></pre>
+
+<!-- ============================== -->
+<h2 id="sec3">3 · MoveState 驱动的参数选择</h2>
+
+<p>每个 agent 在不同移动状态下采用 <b>不同的索敌参数槽</b>（同一份 <code>FTrace</code> 配置里挂着多套 <code>FSectorTraceParamsSpecific</code>）。下表整理 Phase A 的"是否启动"开关与 Phase B 的"用哪套参数"对照：</p>
+
+<table>
+<thead><tr><th>EMoveState</th><th>bCanTrace 来源</th><th>启用的参数槽</th><th>冷却长度来源</th></tr></thead>
+<tbody>
+<tr><td><code>Sleep_Sleeping</code></td><td><code>FSleep.bCanTrace</code></td><td><code>SectorTrace.Sleep</code></td><td>Sleep.bEnable ? Sleep.CoolDown : Common.CoolDown</td></tr>
+<tr><td><code>Patrol_Patrolling</code></td><td><code>FPatrol.bCanTrace</code></td><td><code>SectorTrace.Patrol</code></td><td>Patrol.bEnable ? Patrol.CoolDown : Common.CoolDown</td></tr>
+<tr><td><code>Patrol_Waiting</code></td><td><code>FPatrol.bCanTrace</code></td><td><code>SectorTrace.Patrol</code></td><td>同上</td></tr>
+<tr><td><code>Chase_Chasing</code></td><td><code>FChase.bCanTrace</code></td><td><code>SectorTrace.Chase</code></td><td>Chase.bEnable ? Chase.CoolDown : Common.CoolDown</td></tr>
+<tr><td><code>Chase_Reached</code></td><td><code>FChase.bCanTrace</code></td><td><code>SectorTrace.Chase</code></td><td>同上</td></tr>
+<tr><td><code>Approach_Approaching</code></td><td><code>FTrace.bEnable</code></td><td><code>SectorTrace.Common</code></td><td>Common.CoolDown</td></tr>
+<tr><td><code>Approach_Arrived</code></td><td><code>FTrace.bEnable</code></td><td><code>SectorTrace.Common</code></td><td>Common.CoolDown</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>保底参数 (L1772–L1781)</b>：在 Phase B 选参数时，若当前状态匹配但其专属参数槽 <code>Params.bEnable == false</code>，则 <code>bIsParamsSet</code> 保持 <code>false</code>，最后回落到 <code>Common</code> 槽 — 保证只要 <code>bCanTrace</code> 为真就一定有可用参数。</div>
+
+<h3>关键代码：Phase A 的 switch + 冷却推进</h3>
+<pre><code><span class="cm">// L1517–L1567</span>
+<span class="kw">if</span> (Trace.bEnable &amp;&amp; !bHasAttacking) {           <span class="cm">// 攻击中不索敌</span>
+    <span class="kw">if</span> (Tracing.TimeLeft &lt;= <span class="st">0</span>) {
+        <span class="kw">switch</span> (Moving.MoveState) {
+            <span class="kw">case</span> EMoveState::Sleep_Sleeping:
+                bShouldTrace = Subject.GetTrait&lt;FSleep&gt;().bCanTrace;
+                Tracing.TimeLeft = Trace.SectorTrace.Sleep.bEnable
+                    ? Trace.SectorTrace.Sleep.CoolDown
+                    : Trace.SectorTrace.Common.CoolDown;
+                <span class="kw">break</span>;
+            <span class="cm">// ... Patrol / Chase / Approach 同样模式 ...</span>
+        }
+    } <span class="kw">else</span> {
+        Tracing.TimeLeft = FMath::Clamp(Tracing.TimeLeft - SafeDeltaTime, <span class="st">0</span>, FLT_MAX);
+    }
+}</code></pre>
+
+<!-- ============================== -->
+<h2 id="sec4">4 · 两种 ETraceMode 的检测路径</h2>
+
+<h3>路径 A：<code>ETraceMode::TargetIsPlayer_0</code></h3>
+<p>不走空间索引，<b>直接</b>对 <code>UGameplayStatics::GetPlayerPawn(World, 0)</code> 做四关筛选：</p>
+<ol class="compact">
+  <li><b>高度</b>：<code>PlayerLocation.Z - Located.Location.Z &le; FinalHeight</code></li>
+  <li><b>距离²</b>：<code>DistSquared &le; Square(FinalRange)</code>（避免开方）</li>
+  <li><b>角度</b>：<code>Acos(Dot(Directed.Direction, ToPlayerDir)) &le; FinalAngle / 2</code></li>
+  <li><b>可见性</b>（可选）：<code>UKismetSystemLibrary::SphereTraceSingleForObjects</code> 检查 obstacle 阻挡 — 起点为自身，终点为 <i>玩家表面点</i>（已扣除玩家半径）</li>
+</ol>
+
+<p>玩家有效性在 Phase B 进入前就预取：</p>
+<pre><code><span class="cm">// L1481–L1500  预取玩家句柄（每帧一次，所有 agent 共享）</span>
+APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(CurrentWorld, <span class="st">0</span>);
+<span class="kw">if</span> (IsValid(PlayerPawn)) {
+    USubjectiveActorComponent* C = PlayerPawn-&gt;FindComponentByClass&lt;USubjectiveActorComponent&gt;();
+    <span class="kw">if</span> (IsValid(C)) {
+        PlayerHandle = C-&gt;GetHandle();
+        <span class="kw">if</span> (PlayerHandle.IsValid()
+            &amp;&amp; !PlayerHandle.HasTrait&lt;FDying&gt;()
+            &amp;&amp;  PlayerHandle.HasTrait&lt;FLocated&gt;()
+            &amp;&amp;  PlayerHandle.HasTrait&lt;FHealth&gt;()
+            &amp;&amp;  PlayerHandle.GetTrait&lt;FHealth&gt;().Current &gt; <span class="st">0</span>) {
+            PlayerLocation = PlayerPawn-&gt;GetActorLocation();
+            bPlayerIsValid = <span class="kw">true</span>;
+        }
+    }
+}</code></pre>
+
+<h3>路径 B：<code>ETraceMode::SectorTraceByTraits</code></h3>
+<p>委托给 <code>UNeighborGridComponent::SectorTraceForSubjects</code>（声明于 <code>Public/NeighborGridComponent.h:177</code>），一次性完成：扇形几何 + Trait 过滤 + 可选 obstacle 可见性 + <code>NearToFar</code> 排序。</p>
+
+<pre><code><span class="cm">// L1930–L1948</span>
+Tracing.NeighborGrid-&gt;SectorTraceForSubjects(
+    <span class="st">1</span>,                  <span class="cm">// KeepCount: 只要最近 1 个</span>
+    Located.Location,   <span class="cm">// 扇形原点</span>
+    FinalRange,         <span class="cm">// 半径 (= Collider.Radius*Scale + Params.TraceRadius)</span>
+    FinalHeight,        <span class="cm">// 高度限制</span>
+    TraceDirection,     <span class="cm">// 朝向 (Directed.Direction.GetSafeNormal2D)</span>
+    FinalAngle,         <span class="cm">// 张角</span>
+    bFinalCheckVisibility,
+    Located.Location, <span class="st">0</span>,
+    ESortMode::NearToFar,
+    Located.Location,
+    IgnoreList,         <span class="cm">// 含自身</span>
+    Trace.Filter,       <span class="cm">// FBFFilter: include/exclude traits + obstacle object types</span>
+    DebugConfig,
+    Hit, Results);</code></pre>
+
+<p><b>对比</b>：路径 A 自己手写扇形数学（因为玩家通常不在 NeighborGrid 注册），路径 B 复用空间索引以 <code>O(候选近邻)</code> 替代 <code>O(全部 agent)</code>。</p>
+
+<!-- ============================== -->
+<h2 id="sec5">5 · 领域词汇表 (Trait / Struct Glossary)</h2>
+
+<h3>配置类（设计师在 DataAsset 中填写）</h3>
+<table>
+<thead><tr><th>符号</th><th>位置</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>FTrace</code></td><td class="file">Public/Traits/Trace.h:114</td><td>顶层索敌配置：模式、扇形参数集 <code>SectorTrace</code>、<code>FBFFilter</code>、调试开关</td></tr>
+<tr><td><code>FSectorTraceParams</code></td><td class="file">Public/Traits/Trace.h:12</td><td>扇形基本形状：TraceRadius / TraceAngle / TraceHeight / bCheckObstacle / CoolDown</td></tr>
+<tr><td><code>FSectorTraceParamsSpecific</code></td><td class="file">Public/Traits/Trace.h:42</td><td>带 <code>bEnable</code> 开关的扇形参数；按 MoveState 挂 Sleep / Patrol / Chase / Common 四套</td></tr>
+<tr><td><code>FTraceDrawDebugConfig</code></td><td class="file">Public/BattleFrameStructs.h:523</td><td>调试绘制配置：颜色、时长、线宽、命中点尺寸</td></tr>
+<tr><td><code>ETraceMode</code></td><td class="file">Public/BattleFrameEnums.h:87</td><td><code>TargetIsPlayer_0</code> / <code>SectorTraceByTraits</code></td></tr>
+<tr><td><code>FBFFilter</code></td><td class="file">Public/BattleFrameStructs.h</td><td>include / exclude trait 列表 + obstacle ObjectType（被 NeighborGrid 与可见性 raycast 共用）</td></tr>
+</tbody>
+</table>
+
+<h3>状态类（运行时由本系统读写）</h3>
+<table>
+<thead><tr><th>符号</th><th>位置</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>FTracing</code></td><td class="file">Public/Traits/Trace.h:138</td><td>状态：<code>TraceResult</code>（命中目标句柄）、<code>NeighborGrid</code> 引用、<code>TimeLeft</code> 冷却计时</td></tr>
+<tr><td><code>FAttacking</code></td><td class="file">Public/Traits/Attack.h:24</td><td>攻击中标记 — 拥有时禁止索敌（L1514）</td></tr>
+<tr><td><code>FDying</code></td><td class="file">Public/Traits/Death.h:53</td><td>死亡中标记 — 玩家有此 trait 则 <code>bPlayerIsValid=false</code></td></tr>
+<tr><td><code>FIsSubjective</code></td><td class="file">Public/Traits/IsSubjective.h:7</td><td>"启用蓝图事件"标记；只有它在场才会入队 <code>OnTraceQueue</code></td></tr>
+<tr><td><code>FPatrolling</code></td><td class="file">Public/Traits/Patrol.h:66</td><td>巡逻状态；索敌失败 + <code>OnLostTarget==Patrol</code> 时 <code>SetTraitDeferred</code> 此 trait</td></tr>
+<tr><td><code>FLocated / FDirected / FScaled / FCollider</code></td><td class="file">Public/Traits/Transform.h, Collider.h</td><td>位姿与碰撞半径 — 计算 <code>FinalRange = Collider.Radius * Scale + Params.TraceRadius</code></td></tr>
+<tr><td><code>FMoving</code></td><td class="file">Public/Traits/Move.h</td><td><code>MoveState</code> 是参数选择的开关</td></tr>
+<tr><td><code>FSleep / FPatrol / FChase</code></td><td class="file">Public/Traits/Sleep.h, Patrol.h, Chase.h</td><td>各自的 <code>bCanTrace</code> 决定对应状态下能否索敌</td></tr>
+</tbody>
+</table>
+
+<!-- ============================== -->
+<h2 id="sec6">6 · 事件出口与调试出口</h2>
+
+<p>整个区块跑在并行环境，<b>不能</b>直接调用 BP 事件或 DrawDebug。所有"会触达游戏线程"的副作用都走队列：</p>
+
+<table>
+<thead><tr><th>队列</th><th>入队点</th><th>出队 / 消费</th></tr></thead>
+<tbody>
+<tr><td><code>OnTraceQueue : FTraceData</code></td><td>L1586 (Begin)、L1987 (End_Succeed / End_Fail)</td><td>Tick 末尾 <b>L4167–L4181</b> 出队 → <code>IBattleFrameInterface::Execute_OnTrace(Actor, Data)</code>（蓝图钩子）</td></tr>
+<tr><td><code>DebugLineQueue / DebugSphereQueue / DebugCapsuleQueue / DebugPointQueue / DebugSectorQueue</code></td><td>L1606 / L1613 / L1900 / L1909 / L1977</td><td>统一调试绘制阶段（同一 Tick 末尾），在游戏线程上 DrawDebug*</td></tr>
+</tbody>
+</table>
+
+<pre><code><span class="cm">// L1581–L1587  Begin 事件（在 Phase A）</span>
+<span class="kw">if</span> (bHasIsSubjective) {
+    FTraceData TraceData;
+    TraceData.SelfSubject = FSubjectHandle(Subject);
+    TraceData.State       = ETraceEventState::Begin;
+    OnTraceQueue.Enqueue(TraceData);
+}
+
+<span class="cm">// L1981–L1988  End 事件（在 Phase B 完成后）</span>
+<span class="kw">if</span> (bHasIsSubjective) {
+    FTraceData TraceData;
+    TraceData.SelfSubject = FSubjectHandle(Subject);
+    TraceData.State       = bHasValidTraceResult
+        ? ETraceEventState::End_Reason_Succeed
+        : ETraceEventState::End_Reason_Fail;
+    TraceData.TraceResult = bHasValidTraceResult ? Tracing.TraceResult : FSubjectHandle();
+    OnTraceQueue.Enqueue(TraceData);
+}</code></pre>
+
+<div class="note"><b>为什么三态事件？</b><br>
+<code>Begin</code> 在 Phase A 决定要索敌时立即广播（即使最终没命中也会发），方便蓝图做"开始扫描"动画 / 音效；<br>
+<code>End_Reason_Succeed</code> / <code>End_Reason_Fail</code> 携带最终命中结果，蓝图据此决定切换 AI 状态或反馈。</div>
+
+<!-- ============================== -->
+<h2 id="sec7">7 · 命中后的副作用与下游消费链</h2>
+
+<h3>写回</h3>
+<ul class="compact">
+  <li>命中：<code>Tracing.TraceResult = Results[0].Subject</code> 或 <code>PlayerHandle</code></li>
+  <li>未命中：<code>Tracing.TraceResult = FSubjectHandle()</code>（即先 reset 再可能赋值）</li>
+</ul>
+
+<h3>失败回退到巡逻 (L1992–L1999)</h3>
+<pre><code><span class="kw">const bool</span> bShouldPatrol = !bHasValidTraceResult
+                          &amp;&amp; !Subject.HasTrait&lt;FPatrolling&gt;()
+                          &amp;&amp; Patrol.OnLostTarget == EPatrolRecoverMode::Patrol;
+
+<span class="kw">if</span> (bShouldPatrol) {
+    FPatrolling NewPatrolling;
+    ResetPatrol(Patrol, NewPatrolling, Located);
+    Subject.SetTraitDeferred(NewPatrolling);     <span class="cm">// 并行安全：延迟到 ApplyDeferreds</span>
+}</code></pre>
+<p><code>SetTraitDeferred</code> 而非立即 <code>SetTrait</code>，是因为我们仍在 <code>ParallelFor</code> 内；整段结束时统一调用 <code>Mechanism-&gt;ApplyDeferreds()</code>（L2004）。</p>
+
+<h3>下游谁在读 <code>Tracing.TraceResult</code>？</h3>
+<table>
+<thead><tr><th>阶段</th><th>位置</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>Attack Trigger</td><td class="file">cpp:2046</td><td>判断目标是否仍有效（Valid + 非 Dying + 有 Located + Health&gt;0），有效则进入攻击</td></tr>
+<tr><td>Move（追击目标更新）</td><td class="file">cpp:705</td><td><code>Moving.Goal = TraceResult.GetTrait&lt;FLocated&gt;().Location</code></td></tr>
+<tr><td>Move（FlowField 绑定）</td><td class="file">cpp:711</td><td>把目标的 <code>FBindFlowField</code> 写入自身导航</td></tr>
+</tbody>
+</table>
+
+<!-- ============================== -->
+<h2 id="sec8">8 · 上游配置入口</h2>
+
+<p>设计师在 <code>UAgentConfigDataAsset</code> 中编辑 <code>FTrace Trace</code>（带 "索敌" Tooltip）：</p>
+
+<pre><code><span class="cm">// Public/AgentConfigDataAsset.h:71</span>
+UPROPERTY(BlueprintReadWrite, EditAnywhere, meta = (ToolTip = <span class="st">"索敌"</span>))
+FTrace Trace;</code></pre>
+
+<p>DataAsset 蓝图实例被 Agent 生成器（Spawner）引用，在 Subject 出生（Appear 阶段）时把 <code>FTrace</code> 写入；运行时本区块直接读 <code>Subject.GetTraitRef&lt;FTrace&gt;()</code>。</p>
+
+<div class="pipeline">设计师 ──▶ UAgentConfigDataAsset.Trace (FTrace)
+              │
+              ▼ Spawn 时注入
+        Subject 的 FTrace trait
+              │
+              ▼ 本区块每帧读
+       Phase A: 状态/冷却判定
+       Phase B: 扇形/玩家检测
+              │
+              ▼ 写回
+        Subject 的 FTracing.TraceResult
+              │
+              ▼ 下游读
+       Attack Trigger / Move / 蓝图 OnTrace</div>
+
+<hr style="border: none; border-top: 1px solid var(--border); margin-top: 50px;">
+<p class="file">参考源码：<br>
+&nbsp;&nbsp;BattleFrameBattleControl.cpp:1472-2006 (主体), :4167-4181 (事件出队), :2046 / :705 / :711 (下游消费)<br>
+&nbsp;&nbsp;Public/Traits/Trace.h:12 / :42 / :114 / :138<br>
+&nbsp;&nbsp;Public/AgentConfigDataAsset.h:71<br>
+&nbsp;&nbsp;Public/NeighborGridComponent.h:177<br>
+&nbsp;&nbsp;Public/BattleFrameFunctionLibraryRT.h:109</p>
+
+</body>
+</html>
