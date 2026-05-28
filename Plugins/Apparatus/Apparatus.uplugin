@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "IndexStub",
+	"FriendlyName": "Apparatus (Index Stub)",
+	"Description": "Local stub of the Apparatus plugin used only so Rider/UBT can resolve symbols in BattleFrame. Does NOT implement any real functionality.",
+	"Category": "Stub",
+	"CreatedBy": "local",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EnabledByDefault": false,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "ApparatusRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "PreDefault"
+		}
+	]
+}
