@@ -1,45 +1,12 @@
-## Question
+https://github.com/YGTer/CivilSimulator/issues/174
 
-1. 在 MassBattle 的实现中，它是会将 `ABattleFrameBattleControl` 中的逻辑放到一个 MassProcessor 中实现，还是将里面不同 filter 的不同动作放到不同的 MassProcessor 中实现，如果放到不同的 MassProcessor 中实现，它是如何保证它们之间的线性关系的。
-2. 
+AI 行为是各独立 System 顺序执行后涌现出来的， 而非任何单点的决策树输出。
 
-## `TRACE_CPUPROFILER_EVENT_SCOPE_STR` 宏 —— 性能监控
-`TRACE_CPUPROFILER_EVENT_SCOPE_STR` 是 **Unreal Insights / CPU Profiler 的性能标记宏**，用于在代码中插入一个**命名的性能采样区间**。
+每当添加一种新的 state 到系统中时，它理论上会和
 
-**作用**：
-1. **划定一个作用域（Scope）**：宏展开后会在当前 `{}` 作用域内创建一个临时对象，构造时记录起始时间戳，析构时记录结束时间戳。所以它标记的是"从这条语句到所在 `{}` 结束"这段代码的耗时。
-2. **生成带名字的事件**：参数字符串（如 `"AgentMove"`）会作为这个事件在 profiler 中显示的名字。
-3. **可在 Unreal Insights 中可视化**：当用 `-trace=cpu` 或 Unreal Insights 抓取性能数据时，这些事件会以**火焰图 / 时间线**的形式展示，可以看到每个区间的耗时、调用顺序、线程分布。
+一种可行的方式是，我只维护 state 之间的图，然后通过图描述直接生成代码，这样似乎比需要保证运行的 statetree 可视化效果更好，并且 AI 可读，可理解，可编辑性很高。
+==唯一的问题在于，如何保证代码实现和图描述的是一致的？==
 
-**在本文件中的用法**：
-```cpp
-{
-    TRACE_CPUPROFILER_EVENT_SCOPE_STR("AgentMove");  // 区间开始
+最好有一个类似后台的地方，可以直接管理这些状态流转，这个后台背后可能是 json 配置文件，或者直接是 mermaid 图，AI 和 人 都可读可编辑。
 
-    auto Chain = Mechanism->EnchainSolid(AgentMoveFilter);
-    Chain->OperateConcurrently(...);
-}  // 区间结束 - 自动记录这段代码的总耗时
-```
 
-这样在 Unreal Insights 里就能清晰看到：
-- `BattleControlTick`（最外层，`BattleFrameBattleControl.cpp:43`）
-	- `Agent Statistics` (`:77`)
-	- `AgentAppearMain` (`:124`)
-	- `AgentSleep` (`:259`)
-	- `AgentPatrol` (`:291`)
-	- `SpeedLimitOverride` (`:363`)
-	- `AgentMove` (`:448`) ← 移动阶段耗时
-	- `Update NeighborGrid` (`:1458`)
-	- `AgentTrace` (`:1475`)
-	- ...
-
-**两个相关变体**：
-- `TRACE_CPUPROFILER_EVENT_SCOPE(EventName)`：参数是**标识符**（编译期字符串），如 `TRACE_CPUPROFILER_EVENT_SCOPE(AgentMove)`
-- `TRACE_CPUPROFILER_EVENT_SCOPE_STR("...")`：参数是**字符串字面量**，更灵活，可以用空格、特殊字符
-
-**性能开销**：
-- Shipping 构建中通常被编译为空（零开销）
-- Development / Debug 构建中有轻微开销，但远小于它能帮你定位的性能问题
-- 是 UE5 中分析 ECS / 多线程性能瓶颈的**标准做法**
-
-简言之：**给一段代码贴个名字标签，让 profiler 能告诉你它花了多少毫秒**。
